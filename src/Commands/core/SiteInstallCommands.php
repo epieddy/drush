@@ -12,6 +12,8 @@ use Drush\Exceptions\UserAbortException;
 use Drupal\Core\Config\FileStorage;
 use Consolidation\SiteAlias\SiteAliasManagerAwareInterface;
 use Consolidation\SiteAlias\SiteAliasManagerAwareTrait;
+use Drupal\Core\Site\Settings;
+use Drush\Boot\DrupalBoot8;
 use Drush\Exec\ExecTrait;
 use Drush\Sql\SqlBase;
 use Drush\Utils\StringUtils;
@@ -382,6 +384,25 @@ class SiteInstallCommands extends DrushCommands implements SiteAliasManagerAware
         if (!drush_file_not_empty($settingsfile)) {
             if (!drush_op('copy', 'sites/default/default.settings.php', $settingsfile) && !$this->getConfig()->simulate()) {
                 throw new \Exception(dt('Failed to copy sites/default/default.settings.php to @settingsfile', ['@settingsfile' => $settingsfile]));
+            }
+
+            // The newly created file sites/default/settings.php might contain some
+            // database configuration if the default.settings.php file has been customized.
+            // We need to load the new settings to look for a database config.
+            $bootstrap = Drush::bootstrapManager()->bootstrap();
+            if ($bootstrap instanceof DrupalBoot8) {
+
+                $autoloader = $bootstrap->autoloader();
+                Settings::initialize(Drush::bootstrapManager()->getRoot(), $bootstrap->getKernel()->getSitePath(), $autoloader);
+
+                $options = $commandData->input()->getOptions();
+
+                // If we do find a database configuration, we need to use it instead of the command line arguments.
+                if (Database::getConnectionInfo($options['database'] ?? 'default')) {
+                    $commandData->input()->setOption('db-url', NULL);
+                }
+
+                $sql = SqlBase::create($commandData->input()->getOptions());
             }
         }
 
